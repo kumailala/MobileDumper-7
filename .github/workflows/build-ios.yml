@@ -1,0 +1,63 @@
+name: Build MobileDumper-7.dylib (iOS)
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fetch KittyMemory (iOS memory backend)
+        run: |
+          rm -rf libs/KittyMemory
+          mkdir -p libs
+          git clone --depth 1 https://github.com/MJx0/KittyMemory libs/KittyMemory
+          ls libs/KittyMemory/KittyMemory | head -30
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          echo "iPhoneOS SDK: $(xcrun --sdk iphoneos --show-sdk-path)"
+          cmake --version
+          command -v ninja >/dev/null 2>&1 || brew install ninja
+          ninja --version
+
+      - name: Build dylib
+        run: |
+          chmod +x build.sh
+          ./build.sh --platform ios --target dylib --build release
+
+      - name: Package for injection
+        run: |
+          set -e
+          mkdir -p dist
+          cp builds/ios/dylib/release/arm64/libMobileDumper-7.dylib dist/MobileDumper-7.dylib
+          install_name_tool -id @executable_path/MobileDumper-7.dylib dist/MobileDumper-7.dylib
+          codesign --force --sign - dist/MobileDumper-7.dylib
+
+      - name: Verify
+        run: |
+          set -e
+          echo "== architectures =="
+          lipo -info dist/MobileDumper-7.dylib
+          echo "== install name =="
+          otool -D dist/MobileDumper-7.dylib
+          echo "== linked libraries =="
+          otool -L dist/MobileDumper-7.dylib
+          echo "== size / sha256 =="
+          ls -l dist/MobileDumper-7.dylib
+          shasum -a 256 dist/MobileDumper-7.dylib
+
+      - name: Upload MobileDumper-7.dylib
+        uses: actions/upload-artifact@v4
+        with:
+          name: MobileDumper-7.dylib
+          path: dist/MobileDumper-7.dylib
+          if-no-files-found: error
